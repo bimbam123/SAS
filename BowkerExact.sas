@@ -3,6 +3,9 @@
 /*
 Exact (permutation) Bowker symmetry test for K x K frequency table.
 
+This macro was originally published by Jay Weedon on November 22, 2005 on Math Forums.
+URL: https://www.math-forums.com/threads/exact-test-of-symmetry-revised-code.297492/
+
 Parameters:
 
 data name of input dataset (default=_last_)
