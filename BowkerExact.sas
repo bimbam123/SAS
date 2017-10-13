@@ -1,4 +1,4 @@
-%macro bowker(data=_last_, var1=, var2=, weight=, where=, k=10);
+%macro bowkerExact(data=_last_, var1=, var2=, weight=, where=, k=20);
 
 /*
 Exact (permutation) Bowker symmetry test for K x K frequency table.
@@ -88,42 +88,44 @@ i<j.
 */
 
 *Generate cell frequencies;
-proc freq data=&data;
-tables &var1*&var2 / agree out=_out sparse;
-%if &weight^= %then %do;
-weight &weight / zeros;
-%end;
-%if &where^= %then %do;
-where &where;
-%end;
+
+proc freq data=&data noprint;
+	tables &var1*&var2 / agree(DFSYM=adjust) out=_out sparse;
+	%if &weight^= %then %do;
+	weight &weight / zeros;
+	%end;
+	%if &where^= %then %do;
+	where &where;
+	%end;
 run;
 
 *Copy off-diagonal cell frequencies into macro vars fij.
 Size of table also copied into macro var size;
 data _null_;
-set _out end=last;
-by &var1 &var2;
-if first.&var1 then do;
-_i+1; _j=1;
-end;
-else _j+1;
-if _i^=_j then call
-symput('f'||put(_i,1.)||put(_j,1.),put(count,best16.));
-if last then call symput('size',put(_i,1.));
+	set _out end=last;
+	by &var1 &var2;
+	if first.&var1 then do;
+		_i+1; _j=1;
+	end;
+	else _j+1;
+	if _i^=_j then call
+		symput('f'||put(_i,1.)||put(_j,1.),put(count,best16.));	
+	if last then call symput('size',put(_i,1.));
+	if cmiss(&var1,&var2) then delete;
 run;
 
 *Compute tij=fij+fji, then Bowker statistic as well
 as number of permutations needed and base-2 log of
 sum of weighted permutations;
 %let bowker=0; %let npermute=1; %let log2sumweights=0;
-%do i=1 %to &size-1;
-%do j=&i+1 %to &size;
-%let t&i&j=%eval(&&f&i&j+&&f&j&i);
-%if &&t&i&j>0 %then %let
-bowker=%sysevalf(&bowker+(&&f&i&j-&&f&j&i)**2/&&t&i&j);
-%let npermute=%eval(&npermute*(&&t&i&j+1));
-%let log2sumweights=%eval(&log2sumweights+&&t&i&j);
-%end;
+	%do i=1 %to &size-1;
+		%do j=&i+1 %to &size;
+		%let t&i&j=%eval(&&f&i&j+&&f&j&i);
+		%if &&t&i&j>0 %then %let
+		bowker=%sysevalf(&bowker+(&&f&i&j-&&f&j&i)**2/&&t&i&j);
+		%let npermute=%eval(&npermute*(&&t&i&j+1));
+		%let log2sumweights=%eval(&log2sumweights+&&t&i&j);
+	%end;
 %end;
 
 *Check whether overflow would occur - if so, use normalization
@@ -140,59 +142,63 @@ data _null_;
 
 *Write data step DO statements;
 %do i=1 %to &size-1;
-%do j=&i+1 %to &size;
-%if &&t&i&j>0 %then %do;
-do f&i&j=0 to &&t&i&j;
-%end;
-%end;
+	%do j=&i+1 %to &size;
+		%if &&t&i&j>0 %then %do;
+			do f&i&j=0 to &&t&i&j;
+		%end;
+	%end;
 %end;
 
 *Calculate chi-square for current permutation;
 chisquare=
-%do m=1 %to &size-1;
-%do n=&m+1 %to &size;
-%if &&t&m&n>0 %then %do;
-+(f&m&n+f&m&n-&&t&m&n)**2/&&t&m&n
-%end;
-%end;
+	%do m=1 %to &size-1;
+		%do n=&m+1 %to &size;
+			%if &&t&m&n>0 %then %do;
+			+(f&m&n+f&m&n-&&t&m&n)**2/&&t&m&n
+		%end;
+	%end;
 %end;;
 
 *If chi-square for permutation is greater than or equal
 to observed value, compute weight, which is product
 of binomial(Tmn,Fmn) for all m<n. Logs of weights are
 used to prevent overflows;
+
 if chisquare>=&bowker then do;
-logeweight=
-%do m=1 %to &size-1;
-%do n=&m+1 %to &size;
-%if &&t&m&n>0 %then %do;
-+lgamma(&&t&m&n+1)
--lgamma(f&m&n+1)
--lgamma(&&t&m&n-f&m&n+1)
-%end;
-%end;
-%end;;
-cumweight+exp(logeweight-&factorln2);
+	logeweight=
+		%do m=1 %to &size-1;
+			%do n=&m+1 %to &size;
+				%if &&t&m&n>0 %then %do;
+					+lgamma(&&t&m&n+1)
+					-lgamma(f&m&n+1)
+					-lgamma(&&t&m&n-f&m&n+1)
+				%end;
+			%end;
+		%end;;
+		cumweight+exp(logeweight-&factorln2);
 end;
+
 
 *Write data step END statements;
 %do i=1 %to &size-1;
-%do j=&i+1 %to &size;
-%if &&t&i&j>0 %then %do;
-end;
-%end;
-%end;
+	%do j=&i+1 %to &size;
+		%if &&t&i&j>0 %then %do;
+		end;
+		%end;
+	%end;
 %end;
 
 p=cumweight/(2**(&log2sumweights-&factor));
+
 if fuzz(p)=1 then p=1;
 file print;
-put / @22 "Exact Bowker symmetry test"
-/ @22 "Number of permutations computed = &npermute"
-/ @22 "Number of weighted permutations = 2**&log2sumweights";
-if p>0 then put @22 "Exact p-value = " p;
-else put @22 "The Bowker exact test cannot be computed with
-sufficient precision for this sample size";
+	put / @22 "Exact Bowker symmetry test"
+	/ @22 "Number of permutations computed = &npermute"
+	/ @22 "Number of weighted permutations = 2**&log2sumweights";
+	if p>0 then put @22 "Exact p-value = " p;
+	else put @22 "The Bowker exact test cannot be computed with
+	sufficient precision for this sample size";
+	call symput('pExact',p);
 run;
+
 %mend;
- 
